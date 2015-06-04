@@ -135,7 +135,6 @@ func(q *Queue) Populate(fileName string) {
 	if err != nil {
 		panic(err)	
 	}
-
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
@@ -147,6 +146,7 @@ func(q *Queue) Populate(fileName string) {
 
 //Pop (Poll) from queue and perform necesarry op depending whether we are reading a domain name, email address, or phone number
 func(q *Queue) Resolve() {
+	var wg sync.WaitGroup
 	dnsFile, err := os.Create("dnslookup.txt")
 	if err != nil{
 		panic(err)
@@ -166,35 +166,37 @@ func(q *Queue) Resolve() {
 	defer phoneFile.Close()
 
 	for q.count > 0 {
-		item := q.Poll()
-		//convert item of type interface{} to a string type and do regex on it
-		if str, ok := item.(string); ok && len(str) > 0{	
-			//string str matched to a domain name
-			if retStr := domainRegexp.FindString(str); len(retStr) != 0{			
-				//ip, err := net.ResolveIPAddr("ip4", retStr)
-				ip, err := net.ResolveIPAddr("ip4", retStr)
+		wg.Add(1)
+		go func(){
+			defer wg.Done()
+			item := q.Poll()
+			//convert item of type interface{} to a string type and do regex on it
+			if str, ok := item.(string); ok && len(str) > 0{	
+				if retStr := domainRegexp.FindString(str); len(retStr) != 0{			
+					ip, err := net.ResolveIPAddr("ip4", retStr) //DNS lookup
+					if err != nil{
+             			fmt.Printf("%s error: %s\n", retStr, err)
+        			}
 
-				if err == nil{
-					fmt.Printf("Domain: %s\t IP: %s\n", retStr, ip.String())
+        			fmt.Printf("Domain: %s\t IP: %s\n", retStr, ip.String())
 					toFile := []byte("Domain: " + retStr + "\t" + "IP: " + ip.String() + "\n")
 					dnsFile.Write(toFile)
-        		} else {
-             		fmt.Printf("%s error: %s\n", retStr, err)
-        			panic(err)
-        		}
-        	//string str matched to an email address
-    		}else if retStr = emailRegexp.FindString(str); len(retStr) != 0{
-    			fmt.Printf("Email: %s\n", retStr)
-    			toFile := []byte(retStr + "\n")
-    			emailFile.Write(toFile)
+        	
+    			}else if retStr = emailRegexp.FindString(str); len(retStr) != 0{
+    				fmt.Printf("Email: %s\n", retStr)
+    				toFile := []byte(retStr + "\n")
+    				emailFile.Write(toFile)
 
-   			}else if retStr = phoneRegexp.FindString(str); len(retStr) != 0{
-    			fmt.Printf("US Phone: %s\n", retStr)
-    			toFile := []byte(retStr + "\n")
-    			phoneFile.Write(toFile)
-    		}
-		}
+   				}else if retStr = phoneRegexp.FindString(str); len(retStr) != 0{
+    				fmt.Printf("US Phone: %s\n", retStr)
+    				toFile := []byte(retStr + "\n")
+    				phoneFile.Write(toFile)
+    			}
+			}
+		}()
 	}
+	wg.Wait()
+
 }
 
 //Open a file, match on domain names, do dns lookup on said names
